@@ -1,12 +1,25 @@
 # Realtime MCP Agent
 
-> Experimental voice-first agent workbench that connects real-time conversation to local tools through MCP-style adapters, with explicit guardrails for safe desktop, browser and filesystem automation.
+> Voice-first AI agent workbench for safely routing real-time conversation into local tool actions through MCP-style adapters.
 
 ## Status
 
-**Experimental prototype / portfolio project.**
+**Portfolio-grade experimental prototype.**
 
-This repository is being shaped as a professional, sanitized version of a local Realtime + MCP workbench. It is not a production-ready autonomous agent and does not include private keys, service accounts, local certificates, personal paths, logs, or real credentials.
+This repository is a sanitized public version of a local Realtime + MCP workbench. It demonstrates the architecture and safety model for connecting a conversational voice interface to local desktop, browser and filesystem actions. It is **not** a production-ready autonomous agent and should not be used to control sensitive systems without additional review.
+
+## What works today
+
+| Area | Status | Notes |
+|---|---|---|
+| Public-safe repository foundation | Done | README, docs, license, CI and guardrails are in place. |
+| Tool router | Done | Routes named tool calls to controlled internal handlers. |
+| Safety policy | Done | Allowlist/block/confirmation model for demo actions. |
+| Filesystem sandbox demo | Done | Writes only inside the configured sandbox and blocks path traversal. |
+| Desktop action demo | Partial | Mock adapter validates allowlisted app requests; real Windows/MCP bridge is roadmap. |
+| Browser navigation demo | Partial | Mock adapter validates URL policy; real Playwright/MCP bridge is roadmap. |
+| Realtime voice/WebRTC flow | Architected | Target architecture is documented; live Realtime integration is roadmap for this public repo. |
+| MCP server integrations | Roadmap | Planned integrations include Playwright, filesystem and Windows MCP adapters. |
 
 ## Why this project exists
 
@@ -28,30 +41,7 @@ voice/text response
 
 The goal is to demonstrate how natural voice input can safely trigger local automations such as opening a permitted app, navigating a browser, or writing a file inside a sandbox folder.
 
-## Core demo targets
-
-### Demo 1 — Desktop action
-
-```text
-User: "Open the calculator"
-Agent: validates the action, calls the Windows adapter, opens the calculator, and confirms the result.
-```
-
-### Demo 2 — Sandboxed filesystem action
-
-```text
-User: "Create demo.txt saying MCP is working"
-Agent: writes only inside the configured sandbox directory and confirms the output path.
-```
-
-### Demo 3 — Browser action
-
-```text
-User: "Open example.com"
-Agent: validates the URL, calls the browser adapter, navigates, and reports status.
-```
-
-## Current architecture
+## Architecture
 
 ```text
 Browser UI / Microphone
@@ -70,15 +60,67 @@ Adapters
   └─ Filesystem sandbox adapter
 ```
 
-## Planned integrations
+See [`docs/architecture.md`](docs/architecture.md) for the full design.
 
-- OpenAI Realtime API / WebRTC session flow
-- MCP-compatible tool adapters
-- Playwright-based browser automation
-- Windows desktop tool bridge
-- Filesystem sandbox operations
-- Human confirmation for risky actions
-- CI checks and reproducible demo commands
+## Safe demo targets
+
+### Demo 1 — Desktop action
+
+```text
+User: "Open the calculator"
+Agent: validates the action, calls the desktop adapter, and confirms the result.
+```
+
+Current public implementation: mock desktop adapter.
+
+### Demo 2 — Sandboxed filesystem action
+
+```text
+User: "Create demo.txt saying MCP is working"
+Agent: writes only inside the configured sandbox directory and confirms the output path.
+```
+
+Current public implementation: real local sandbox write with path traversal protection.
+
+### Demo 3 — Browser action
+
+```text
+User: "Open example.com"
+Agent: validates the URL, calls the browser adapter, and reports status.
+```
+
+Current public implementation: mock browser adapter with domain allowlist/confirmation behavior.
+
+## Quickstart
+
+Prerequisites:
+
+- Node.js 20+
+- pnpm
+
+```bash
+pnpm install
+pnpm check
+pnpm demo:tools
+```
+
+Expected demo behavior:
+
+- `open_app` accepts allowlisted demo apps such as `calculator`;
+- `write_sandbox_file` writes inside `./sandbox`;
+- path traversal such as `../escape.txt` is blocked;
+- `navigate_url` allows `https://example.com`;
+- unknown domains require confirmation.
+
+## Configuration
+
+Copy the example environment file locally:
+
+```bash
+cp .env.example .env
+```
+
+Public examples use placeholder values only. Do not commit real `.env` files, service accounts, certificates, tokens or local machine paths.
 
 ## Security model
 
@@ -105,25 +147,29 @@ See [`docs/security.md`](docs/security.md).
 │  ├─ demo-guide.md
 │  ├─ mcp-tools.md
 │  ├─ roadmap.md
-│  └─ security.md
+│  ├─ security.md
+│  └─ status.md
 ├─ examples/
 │  ├─ browser-navigation.md
 │  ├─ create-sandbox-file.md
 │  └─ open-calculator.md
 ├─ src/
-│  ├─ client/
 │  └─ server/
+│     ├─ demo-tools.ts
+│     ├─ safety-policy.ts
+│     └─ tool-router.ts
 └─ .github/
    └─ workflows/
+      └─ ci.yml
 ```
 
 ## Portfolio framing
 
 This project demonstrates:
 
-- voice AI interface design;
+- voice AI interface architecture;
 - agent tool routing;
-- MCP-style local automation;
+- MCP-style local automation design;
 - safety policies for AI-controlled tools;
 - browser/desktop/filesystem automation patterns;
 - practical AI assistant engineering beyond chat-only interfaces.
@@ -131,6 +177,15 @@ This project demonstrates:
 ## Roadmap
 
 See [`docs/roadmap.md`](docs/roadmap.md).
+
+## Non-goals
+
+- no autonomous purchases;
+- no unrestricted shell execution;
+- no email sending;
+- no production deployment;
+- no sensitive system automation;
+- no real credentials in the repository.
 
 ## License
 
