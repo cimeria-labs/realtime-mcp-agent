@@ -82,6 +82,7 @@ async function writeSandboxFile(argsInput: Record<string, unknown>): Promise<Too
   const args = WriteSandboxFileArgsSchema.parse(argsInput);
   const sandboxRoot = path.resolve(defaultPolicyConfig.sandboxDir);
   const target = path.resolve(sandboxRoot, args.path);
+  const publicPath = path.relative(process.cwd(), target).replaceAll(path.sep, "/");
 
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(target, args.content, "utf8");
@@ -89,9 +90,9 @@ async function writeSandboxFile(argsInput: Record<string, unknown>): Promise<Too
   return {
     ok: true,
     tool: "write_sandbox_file",
-    message: `Wrote file inside sandbox: ${path.relative(process.cwd(), target)}`,
+    message: `Wrote file inside sandbox: ${publicPath}`,
     data: {
-      path: target
+      path: publicPath
     }
   };
 }
