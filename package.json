@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": false,
   "type": "module",
-  "description": "Experimental voice-first Realtime + MCP agent workbench for safe local automation.",
+  "description": "TypeScript tool-router and safety-policy foundation for local AI automation demos.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
@@ -11,12 +11,12 @@
   },
   "keywords": [
     "ai-agent",
-    "realtime",
-    "mcp",
-    "voice-ai",
-    "playwright",
+    "mcp-ready",
+    "safety-policy",
     "automation",
-    "tool-calling"
+    "tool-calling",
+    "local-automation",
+    "sandbox"
   ],
   "license": "MIT",
   "engines": {

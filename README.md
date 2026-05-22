@@ -1,116 +1,87 @@
 # Realtime MCP Agent
 
-> Voice-first AI agent workbench for safely routing real-time conversation into local tool actions through MCP-style adapters.
+[![CI](https://github.com/cimeria-labs/realtime-mcp-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/cimeria-labs/realtime-mcp-agent/actions/workflows/ci.yml)
 
-## Status
+Realtime MCP Agent is a TypeScript safety and tool-routing foundation for local AI automation demos. The current public code validates named tool calls, applies allow/block/confirm policy decisions, writes only inside a sandbox folder, and uses mock desktop/browser adapters.
 
-**Portfolio-grade experimental prototype.**
+The repository name reflects the target direction: a voice-first Realtime + MCP workbench. The current public implementation does not yet include a live Realtime voice client, WebRTC session flow, or real MCP server integrations.
 
-This repository is a sanitized public version of a local Realtime + MCP workbench. It demonstrates the architecture and safety model for connecting a conversational voice interface to local desktop, browser and filesystem actions. It is **not** a production-ready autonomous agent and should not be used to control sensitive systems without additional review.
+## Problem
 
-## What works today
+Local AI agents become risky when model output can directly control the desktop, browser, filesystem, or shell. This project demonstrates a safer pattern: route every tool request through explicit schemas, a policy layer, and narrow adapters.
 
-| Area | Status | Notes |
-|---|---|---|
-| Public-safe repository foundation | Done | README, docs, license, CI and guardrails are in place. |
-| Tool router | Done | Routes named tool calls to controlled internal handlers. |
-| Safety policy | Done | Allowlist/block/confirmation model for demo actions. |
-| Filesystem sandbox demo | Done | Writes only inside the configured sandbox and blocks path traversal. |
-| Desktop action demo | Partial | Mock adapter validates allowlisted app requests; real Windows/MCP bridge is roadmap. |
-| Browser navigation demo | Partial | Mock adapter validates URL policy; real Playwright/MCP bridge is roadmap. |
-| Realtime voice/WebRTC flow | Architected | Target architecture is documented; live Realtime integration is roadmap for this public repo. |
-| MCP server integrations | Roadmap | Planned integrations include Playwright, filesystem and Windows MCP adapters. |
+## What Works Today
 
-## Why this project exists
+| Area | Current evidence |
+|---|---|
+| Tool router | `src/server/tool-router.ts` routes `open_app`, `write_sandbox_file`, and `navigate_url`. |
+| Safety policy | `src/server/safety-policy.ts` returns allow, block, or confirmation decisions. |
+| Sandboxed filesystem write | `write_sandbox_file` writes inside `./sandbox` and blocks path traversal. |
+| Mock desktop action | `open_app` validates an allowlisted app and returns a mock adapter result. |
+| Mock browser navigation | `navigate_url` validates URL scheme/domain and returns a mock adapter result. |
+| Demo smoke test | `src/server/demo-tools.ts` exercises allowed, blocked, and confirmation-required paths. |
+| TypeScript verification | `npm run check` / CI runs `tsc --noEmit`. |
 
-Most AI assistants are conversational only. This project explores a more useful pattern:
+## What Is Not Implemented Yet
 
-```text
-voice command
-  ↓
-real-time agent session
-  ↓
-tool routing / policy check
-  ↓
-MCP-style adapter
-  ↓
-local action: desktop, browser, or sandboxed filesystem
-  ↓
-voice/text response
-```
+- No live Realtime voice or WebRTC client.
+- No server endpoint for short-lived Realtime credentials.
+- No real MCP server connection.
+- No real Playwright/browser control.
+- No real Windows desktop bridge.
+- No production deployment model.
+- No unrestricted shell execution by design.
 
-The goal is to demonstrate how natural voice input can safely trigger local automations such as opening a permitted app, navigating a browser, or writing a file inside a sandbox folder.
+## 60-Second Reviewer Path
 
-## Architecture
-
-```text
-Browser UI / Microphone
-        ↓
-Realtime session client
-        ↓
-Local Node.js server
-        ↓
-Tool router
-        ↓
-Safety policy
-        ↓
-Adapters
-  ├─ Desktop adapter
-  ├─ Browser adapter
-  └─ Filesystem sandbox adapter
-```
-
-See [`docs/architecture.md`](docs/architecture.md) for the full design.
-
-## Safe demo targets
-
-### Demo 1 — Desktop action
-
-```text
-User: "Open the calculator"
-Agent: validates the action, calls the desktop adapter, and confirms the result.
-```
-
-Current public implementation: mock desktop adapter.
-
-### Demo 2 — Sandboxed filesystem action
-
-```text
-User: "Create demo.txt saying MCP is working"
-Agent: writes only inside the configured sandbox directory and confirms the output path.
-```
-
-Current public implementation: real local sandbox write with path traversal protection.
-
-### Demo 3 — Browser action
-
-```text
-User: "Open example.com"
-Agent: validates the URL, calls the browser adapter, and reports status.
-```
-
-Current public implementation: mock browser adapter with domain allowlist/confirmation behavior.
-
-## Quickstart
-
-Prerequisites:
-
-- Node.js 20+
-- pnpm
+1. Read current status: [`docs/status.md`](docs/status.md).
+2. Inspect the safety policy: [`src/server/safety-policy.ts`](src/server/safety-policy.ts).
+3. Inspect the tool router: [`src/server/tool-router.ts`](src/server/tool-router.ts).
+4. Review architecture boundaries: [`docs/architecture.md`](docs/architecture.md).
+5. Run the checks:
 
 ```bash
-pnpm install
-pnpm check
-pnpm demo:tools
+npm install
+npm run check
+npm run demo:tools
 ```
 
 Expected demo behavior:
 
 - `open_app` accepts allowlisted demo apps such as `calculator`;
-- `write_sandbox_file` writes inside `./sandbox`;
+- `write_sandbox_file` writes `sandbox/demo.txt`;
 - path traversal such as `../escape.txt` is blocked;
 - `navigate_url` allows `https://example.com`;
 - unknown domains require confirmation.
+
+## Architecture
+
+Current public runtime:
+
+```text
+demo-tools.ts
+  -> routeToolCall()
+  -> decideToolUse()
+  -> allow | block | confirm
+  -> mock desktop adapter
+  -> sandbox filesystem adapter
+  -> mock browser adapter
+```
+
+Target architecture:
+
+```text
+Voice or text command
+  -> Realtime session client
+  -> local server
+  -> tool router
+  -> safety policy
+  -> MCP-style adapter
+  -> local action
+  -> response
+```
+
+Only the router, policy layer, sandboxed filesystem demo, and mock adapters are implemented in this public version.
 
 ## Configuration
 
@@ -120,73 +91,71 @@ Copy the example environment file locally:
 cp .env.example .env
 ```
 
-Public examples use placeholder values only. Do not commit real `.env` files, service accounts, certificates, tokens or local machine paths.
+Safe demo defaults:
 
-## Security model
+```env
+SANDBOX_DIR=./sandbox
+ALLOW_DESKTOP_APPS=calculator,notepad
+ALLOW_BROWSER_DOMAINS=example.com
+```
 
-This project intentionally starts with a conservative tool policy:
+Never commit real `.env` files, service accounts, certificates, tokens, private paths, or logs.
 
-- no real credentials committed;
-- no unrestricted shell execution;
-- filesystem writes restricted to a sandbox directory;
-- allowlist for desktop applications;
-- denylist for destructive commands;
-- manual confirmation required for risky operations;
-- `.env.example` only, never `.env`.
+## Safety Model
+
+The project starts with a conservative policy:
+
+- named tools only;
+- Zod schemas for tool arguments;
+- sandboxed filesystem writes;
+- desktop app allowlist;
+- browser scheme and domain checks;
+- confirmation response for unknown domains;
+- no arbitrary shell tool;
+- no production system control.
 
 See [`docs/security.md`](docs/security.md).
 
-## Repository structure
+## Repository Layout
 
 ```text
 .
-├─ README.md
-├─ AGENTS.md
-├─ docs/
-│  ├─ architecture.md
-│  ├─ demo-guide.md
-│  ├─ mcp-tools.md
-│  ├─ roadmap.md
-│  ├─ security.md
-│  └─ status.md
-├─ examples/
-│  ├─ browser-navigation.md
-│  ├─ create-sandbox-file.md
-│  └─ open-calculator.md
-├─ src/
-│  └─ server/
-│     ├─ demo-tools.ts
-│     ├─ safety-policy.ts
-│     └─ tool-router.ts
-└─ .github/
-   └─ workflows/
-      └─ ci.yml
+|-- README.md
+|-- AGENTS.md
+|-- package.json
+|-- tsconfig.json
+|-- docs/
+|   |-- architecture.md
+|   |-- demo-guide.md
+|   |-- mcp-tools.md
+|   |-- portfolio.md
+|   |-- roadmap.md
+|   |-- security.md
+|   `-- status.md
+|-- examples/
+|-- sandbox/
+`-- src/server/
+    |-- demo-tools.ts
+    |-- safety-policy.ts
+    `-- tool-router.ts
 ```
 
-## Portfolio framing
+## Portfolio Positioning
 
-This project demonstrates:
+Use this repo as evidence of:
 
-- voice AI interface architecture;
-- agent tool routing;
-- MCP-style local automation design;
-- safety policies for AI-controlled tools;
-- browser/desktop/filesystem automation patterns;
-- practical AI assistant engineering beyond chat-only interfaces.
+- safe tool-calling architecture;
+- policy-controlled local automation;
+- sandboxed filesystem operations;
+- adapter boundaries for future MCP integrations;
+- TypeScript implementation of allow/block/confirm decisions.
 
-## Roadmap
+Do not present it as a working voice assistant, real MCP integration, or production desktop automation agent.
 
-See [`docs/roadmap.md`](docs/roadmap.md).
+## Resume Bullet
 
-## Non-goals
-
-- no autonomous purchases;
-- no unrestricted shell execution;
-- no email sending;
-- no production deployment;
-- no sensitive system automation;
-- no real credentials in the repository.
+Built a TypeScript tool-routing and safety-policy foundation for local AI automation, validating named tool calls with Zod, enforcing allow/block/confirm decisions, restricting filesystem writes to a sandbox, and documenting a roadmap toward Realtime voice and MCP adapter integrations.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+MIT. See [`LICENSE`](LICENSE).

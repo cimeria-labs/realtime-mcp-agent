@@ -1,79 +1,62 @@
 # Project Status
 
-## Summary
+Realtime MCP Agent is a public experimental prototype. The current code proves a safe local tool-routing foundation; the live Realtime voice client and real MCP adapters are roadmap work.
 
-Realtime MCP Agent is currently a **portfolio-grade experimental prototype**.
+## Status Summary
 
-The public repository intentionally focuses on a safe, reproducible foundation before connecting live voice automation and real MCP servers.
+| Layer | Status | Evidence | Notes |
+|---|---|---|---|
+| TypeScript project foundation | Implemented | `package.json`, `tsconfig.json`, CI | Type checking and demo smoke test are configured. |
+| Tool router | Implemented | `src/server/tool-router.ts` | Routes named tools to controlled handlers. |
+| Safety policy | Implemented | `src/server/safety-policy.ts` | Produces allow, block, or confirm decisions. |
+| Filesystem sandbox | Implemented | `write_sandbox_file` | Writes inside configured sandbox and blocks path traversal. |
+| Desktop automation | Mock only | `open_app` handler | Validates allowlist and returns a mock result; does not open real apps. |
+| Browser automation | Mock only | `navigate_url` handler | Validates URL policy and returns a mock result; does not drive a real browser. |
+| Realtime voice/WebRTC | Roadmap | `docs/roadmap.md` | Target architecture is documented; no live client is bundled. |
+| MCP server integrations | Roadmap | `docs/mcp-tools.md` | Adapter contract exists; no real MCP server connection is implemented. |
+| Production readiness | Not production-ready | `docs/security.md` | Needs real adapters, confirmation UX, tests, logging, and deployment hardening. |
 
-## Current status by layer
+## What Is Safe To Claim
 
-| Layer | Status | Evidence |
-|---|---|---|
-| Repository foundation | Done | README, docs, license, CI, examples and guardrails exist. |
-| Safety policy | Done | `src/server/safety-policy.ts` implements allow/block/confirm decisions. |
-| Tool router | Done | `src/server/tool-router.ts` routes named tools to internal handlers. |
-| Filesystem sandbox | Done | Demo writes inside `./sandbox` and blocks path traversal. |
-| Desktop automation | Partial | Mock adapter validates allowlisted app requests. Real Windows/MCP execution is planned. |
-| Browser automation | Partial | Mock adapter validates URL policy. Real Playwright/MCP execution is planned. |
-| Realtime voice | Architected | Public repo documents the target WebRTC/Realtimesession flow. Live integration is roadmap. |
-| MCP integrations | Roadmap | Planned adapters include Playwright MCP, filesystem MCP and Windows desktop bridge. |
+- The repo implements a TypeScript tool router.
+- It implements a safety policy with allow/block/confirm decisions.
+- It includes a real sandboxed file-write demo.
+- It includes mock desktop and browser adapters.
+- It documents a credible path toward Realtime and MCP integrations.
 
-## What is done
+## What Not To Claim
 
-- Public-safe repository structure.
-- TypeScript project setup.
-- CI smoke test.
-- Safety policy module.
-- Tool router module.
-- Sandboxed filesystem write demo.
-- Mock desktop adapter.
-- Mock browser adapter.
-- Documentation for architecture, security, roadmap and demo flow.
+- Do not claim a working voice assistant.
+- Do not claim live Realtime API integration.
+- Do not claim real MCP server integration.
+- Do not claim real desktop or browser automation.
+- Do not claim production readiness or enterprise-grade sandboxing.
 
-## What is partial
+## Current Verification
 
-- Desktop automation is represented by a mock adapter.
-- Browser navigation is represented by a mock adapter.
-- The public repo does not yet execute real Windows or Playwright MCP actions.
+Run:
 
-## What is architected
+```bash
+npm run check
+npm run demo:tools
+```
 
-- Voice command to Realtime session.
-- Realtime model tool call to local router.
-- Router to policy layer.
-- Policy layer to MCP-style adapters.
-- Human confirmation for risky actions.
+The demo exercises:
 
-## What is roadmap
+- allowed desktop request through the mock adapter;
+- sandboxed file write;
+- blocked path traversal;
+- allowlisted browser navigation through the mock adapter;
+- confirmation-required external navigation.
 
-- Browser UI skeleton.
-- Realtime WebRTC session flow.
-- Real MCP adapters.
-- Screenshots/GIFs and demo video.
-- Release tag `v0.1.0-demo`.
+## Main Remaining Risks
 
-## Public repository safety note
+- No unit test suite beyond the demo script.
+- Mock adapters can be mistaken for real automation if docs are vague.
+- No Realtime session credential endpoint exists yet.
+- No MCP client/server integration exists yet.
+- Filesystem sandboxing is a demo guardrail, not a formally verified security boundary.
 
-This repository must remain sanitized. Do not commit:
+## Recommended Next Step
 
-- `.env` files;
-- API keys;
-- service accounts;
-- certificates;
-- personal filesystem paths;
-- raw logs;
-- screenshots with private information;
-- real customer or business data.
-
-## Portfolio wording
-
-Safe wording:
-
-> Experimental Realtime + MCP agent workbench demonstrating voice-first local automation architecture, safety policy, sandboxed tool routing and MCP-ready adapters.
-
-Avoid wording:
-
-> Fully autonomous production agent that controls the computer.
-
-This distinction keeps the project accurate, credible and safe for public portfolio use.
+Add focused unit tests for `decideToolUse()` and `routeToolCall()`, then implement one real adapter path, preferably browser navigation through Playwright or a minimal MCP-compatible adapter. That would move the project from architecture foundation to stronger technical demo.

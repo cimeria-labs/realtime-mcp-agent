@@ -2,7 +2,7 @@
 
 ## Current status
 
-The first implementation uses mock adapters to validate routing and policy before connecting real MCP servers.
+The current public implementation uses direct internal handlers plus mock desktop/browser adapters to validate routing and policy before connecting real MCP servers. It is MCP-ready by design, but it does not yet connect to an MCP server.
 
 ## Target adapters
 
@@ -76,7 +76,7 @@ take_screenshot()
 
 ## Adapter contract
 
-All adapters should return normalized results:
+All current and future adapters should return normalized results:
 
 ```ts
 interface ToolResult {
@@ -89,4 +89,22 @@ interface ToolResult {
 
 ## Principle
 
-MCP gives the agent capabilities, but this project should expose only the smallest safe set of tools needed for each demo milestone.
+MCP can give an agent powerful capabilities, but this project should expose only the smallest safe set of tools needed for each demo milestone.
+
+## Claim Boundary
+
+Accurate wording:
+
+```text
+MCP-style adapter plan
+MCP-ready tool result contract
+roadmap toward real MCP server integrations
+```
+
+Avoid:
+
+```text
+working MCP integration
+connected MCP servers
+production MCP automation
+```
