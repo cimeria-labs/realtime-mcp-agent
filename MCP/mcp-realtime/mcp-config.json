@@ -1,0 +1,16 @@
+{
+  "mcpServers": [
+    {
+      "id": "chrome-browser",
+      "command": "node",
+      "args": ["C:/Users/Fernando/Documents/MCP_GITHUB/MCP/mcp-chrome-stdio.js"],
+      "enabled": true
+    },
+    {
+      "id": "filesystem",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:/Users/Fernando/Documents/MCP_GITHUB/sandbox"],
+      "enabled": true
+    }
+  ]
+}

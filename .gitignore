@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Large/binary data
+MCP/ChromeCDP/
+MCP/realtime-client/node_modules/
+MCP/realtime-client/test*.wav
+MCP/realtime-client/*.pem
+MCP/realtime-client/mkcert.exe
+
+# Logs
+logs/
+*.log
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

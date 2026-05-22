@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>GPTola Realtime WebRTC + MCP</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; line-height: 1.45; padding: 16px; max-width: 960px; margin: 0 auto; }
+  .row { margin: 8px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  textarea { flex: 1; min-width: 240px; padding: 10px 12px; border-radius: 10px; border: 1px solid #4445; resize: vertical; }
+  button { padding: 10px 14px; border-radius: 10px; border: 1px solid #4445; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  input[type="file"] { padding: 6px; }
+  select { padding: 8px 10px; border-radius: 8px; border: 1px solid #4445; }
+  #chat { margin: 12px 0 16px; display: grid; gap: 10px; }
+  .msg { max-width: 80%; padding: 10px 12px; border-radius: 14px; white-space: pre-wrap; }
+  .user { justify-self: end; background: #3b82f620; border: 1px solid #3b82f640; }
+  .bot  { justify-self: start; background: #10b98120; border: 1px solid #10b98140; }
+  .partial { opacity: .7; }
+  .vu { width: 160px; height: 10px; background: #0001; border-radius: 999px; overflow: hidden; }
+  .vu > span { display: block; height: 100%; width: 0%; background: #22c55e; transition: width .08s linear; }
+  pre#log, pre#agentLog { background: #111; color: #0f0; padding: 10px; max-height: 26vh; overflow: auto; }
+  .grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .card { border: 1px solid #4445; border-radius: 12px; padding: 12px; }
+  .img-holder img { max-width: 100%; border-radius: 8px; border: 1px solid #4445; }
+</style>
+</head>
+<body>
+<h2>GPTola Realtime WebRTC</h2>
+<div class="row">
+  <button id="connectBtn">Conectar</button>
+  <button id="hangupBtn" disabled>Desconectar</button>
+  <label>Voz:
+    <select id="voiceSelect">
+      <option value="marin">Marin</option>
+      <option value="cedar">Cedar</option>
+      <option value="alloy" selected>Alloy</option>
+      <option value="verse">Verse</option>
+    </select>
+  </label>
+  <label><input type="checkbox" id="talkToggle" checked /> Capturar audio</label>
+  <div class="vu"><span id="vuBar"></span></div>
+  <span id="vuTag">mic: off</span>
+</div>
+
+<div id="chat"></div>
+
+<div class="row">
+  <textarea id="textInput" rows="2" placeholder="Enter envia - Shift+Enter quebra linha"></textarea>
+  <button id="sendTextBtn" disabled>Enviar</button>
+</div>
+
+<div class="row">
+  <input id="imgInput" type="file" accept="image/*" multiple />
+  <button id="sendImgBtn" disabled>Enviar imagens</button>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h3>Agente MCP (remoto)</h3>
+    <p>Executa prompt via bridge MCP local.</p>
+    <div class="row">
+      <textarea id="agentInput" rows="2" placeholder="Ex.: Pesquise algo no MCP"></textarea>
+      <button id="runAgentBtn">Executar</button>
+    </div>
+    <pre id="agentLog"></pre>
+  </div>
+
+  <div class="card">
+    <h3>Automacao do navegador</h3>
+    <p>Controla a aba conectada na extensao Browser MCP.</p>
+    <div class="row">
+      <input id="navUrl" placeholder="https://..." style="flex:1;padding:8px;border:1px solid #4445;border-radius:8px;" />
+      <button id="btnNavigate">Abrir</button>
+    </div>
+    <div class="row">
+      <input id="sel" placeholder="CSS selector" style="flex:1;padding:8px;border:1px solid #4445;border-radius:8px;" />
+      <input id="txt" placeholder="texto (para type)" style="flex:1;padding:8px;border:1px solid #4445;border-radius:8px;" />
+    </div>
+    <div class="row">
+      <button id="btnClick">Click</button>
+      <button id="btnType">Type</button>
+      <button id="btnPressEnter">Press Enter</button>
+      <button id="btnWait">Wait (selector)</button>
+      <button id="btnShot">Screenshot</button>
+    </div>
+    <div id="browserLog" class="img-holder"></div>
+  </div>
+</div>
+
+<pre id="log"></pre>
+
+<script>
+const HOST = location.protocol === 'https:' ? 'https://localhost:3443' : 'http://localhost:3000';
+const TOKEN_URL = `${HOST}/token`;
+const MCP_URL = `${HOST}/mcp/run`;
+const BROWSER_BASE = HOST;
+const REALTIME_URL = 'https://api.openai.com/v1/realtime';
+const DEFAULT_MODEL = window.REALTIME_MODEL || 'gpt-realtime';
+
+const logEl = document.getElementById('log');
+const chat = document.getElementById('chat');
+const connectBtn = document.getElementById('connectBtn');
+const hangupBtn = document.getElementById('hangupBtn');
+const sendTextBtn = document.getElementById('sendTextBtn');
+const sendImgBtn = document.getElementById('sendImgBtn');
+const textInput = document.getElementById('textInput');
+const imgInput = document.getElementById('imgInput');
+const voiceSelect = document.getElementById('voiceSelect');
+const talkToggle = document.getElementById('talkToggle');
+const vuBar = document.getElementById('vuBar');
+const vuTag = document.getElementById('vuTag');
+
+let pc = null;
+let dc = null;
+let remoteAudio = null;
+let micTrack = null;
+let localStream = null;
+let vuAnimation = null;
+let vuContext = null;
+let activeModel = DEFAULT_MODEL;
+let connected = false;
+
+const LOG = (...args) => {
+  const line = args.map(item => typeof item === 'string' ? item : JSON.stringify(item, null, 2)).join(' ');
+  logEl.textContent += `${line}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+  console.log(...args);
+};
+
+function addBubble(role, text = '', id = null, partial = false) {
+  let el = id ? document.getElementById(id) : null;
+  if (!el) {
+    el = document.createElement('div');
+    el.className = `msg ${role === 'user' ? 'user' : 'bot'}`;
+    if (id) el.id = id;
+    chat.appendChild(el);
+  }
+  el.textContent = text;
+  el.classList.toggle('partial', partial);
+  chat.scrollTop = chat.scrollHeight;
+  return el;
+}
+
+function appendImages(el, urls) {
+  const wrap = document.createElement('div');
+  wrap.style.display = 'flex';
+  wrap.style.gap = '8px';
+  urls.forEach(src => {
+    const img = document.createElement('img');
+    img.src = src;
+    img.style.maxWidth = '160px';
+    img.style.maxHeight = '120px';
+    img.style.borderRadius = '8px';
+    img.style.border = '1px solid #4445';
+    wrap.appendChild(img);
+  });
+  el.appendChild(wrap);
+}
+
+function resetVu() {
+  if (vuAnimation) {
+    cancelAnimationFrame(vuAnimation);
+    vuAnimation = null;
+  }
+  if (vuContext) {
+    try { vuContext.close(); } catch (e) {}
+    vuContext = null;
+  }
+  vuBar.style.width = '0%';
+  vuTag.textContent = 'mic: off';
+}
+
+async function requestEphemeralKey() {
+  const voice = voiceSelect ? voiceSelect.value : 'alloy';
+  const params = new URLSearchParams();
+  if (voice) params.set('voice', voice);
+  if (activeModel) params.set('model', activeModel);
+  const url = `${TOKEN_URL}?${params.toString()}`;
+  const resp = await fetch(url);
+  let data;
+  try {
+    data = await resp.json();
+  } catch (err) {
+    throw new Error(`Token JSON invalido (${resp.status})`);
+  }
+  if (!resp.ok) {
+    const message = data?.error?.message || data?.error || JSON.stringify(data);
+    throw new Error(`Token falhou: ${message}`);
+  }
+  const token = data?.value || data?.client_secret?.value || data?.client_secret;
+  if (!token) {
+    throw new Error('Token invalido: client_secret ausente');
+  }
+  if (data?.model) {
+    activeModel = data.model;
+  }
+  if (data?.voice && voiceSelect) {
+    voiceSelect.value = data.voice;
+  }
+  return token;
+}
+
+function detachMicSender() {
+  if (!pc || !micTrack) return;
+  const sender = pc.getSenders().find(s => s.track === micTrack);
+  if (sender) {
+    try { pc.removeTrack(sender); } catch (err) { LOG('removeTrack erro', err); }
+  }
+}
+
+function disableMic() {
+  detachMicSender();
+  if (micTrack) {
+    micTrack.stop();
+    micTrack = null;
+  }
+  if (localStream) {
+    localStream.getTracks().forEach(track => track.stop());
+    localStream = null;
+  }
+  resetVu();
+}
+
+async function enableMic() {
+  disableMic();
+  if (!pc) return;
+  const constraints = {
+    audio: {
+      channelCount: 1,
+      sampleRate: 48000,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
+    }
+  };
+  localStream = await navigator.mediaDevices.getUserMedia(constraints);
+  micTrack = localStream.getAudioTracks()[0];
+  pc.addTrack(micTrack, localStream);
+  startVUMeter(localStream);
+}
+
+function startVUMeter(stream) {
+  resetVu();
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return;
+  vuContext = new AudioCtx();
+  const source = vuContext.createMediaStreamSource(stream);
+  const analyser = vuContext.createAnalyser();
+  analyser.fftSize = 512;
+  source.connect(analyser);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  vuTag.textContent = 'mic: on';
+  (function loop() {
+    analyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 1) {
+      const v = (data[i] - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / data.length);
+    vuBar.style.width = `${Math.min(100, Math.round(rms * 180))}%`;
+    vuAnimation = requestAnimationFrame(loop);
+  }());
+}
+
+function ensureDataChannel() {
+  return dc && dc.readyState === 'open';
+}
+
+function sendResponseCreate(content) {
+  if (!ensureDataChannel()) {
+    addBubble('bot', 'Canal nao esta pronto.');
+    return;
+  }
+  dc.send(JSON.stringify({
+    type: 'conversation.item.create',
+    item: { type: 'message', role: 'user', content }
+  }));
+  dc.send(JSON.stringify({
+    type: 'response.create',
+    response: {
+      modalities: ['audio', 'text'],
+      instructions: 'Responda em pt-BR de forma breve.'
+    }
+  }));
+}
+
+function handleRealtimePayload(msg) {
+  if (!msg || typeof msg !== 'object') return;
+  if (msg.type) LOG('[DC]', msg.type);
+  const responseId = msg.response_id || msg?.response?.id || msg.item_id;
+  switch (msg.type) {
+    case 'response.function_call_arguments.done': {
+      const toolCall = msg.call;
+      LOG('🛠️ Tool Call Detectada:', toolCall);
+
+      (async () => {
+        try {
+          const resp = await fetch(`${HOST}/mcp/execute`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: toolCall.name,
+              arguments: toolCall.arguments,
+              id: toolCall.id
+            })
+          });
+          const result = await resp.json();
+
+          if (result.status === 'requires_confirmation') {
+            LOG('🛡️ Aguardando confirmação do usuário...');
+            const confirmed = confirm(`A IA solicitou executar a ferramenta: ${toolCall.name}\\n\\n${result.output}`);
+
+            if (confirmed) {
+              const confResp = await fetch(`${HOST}/mcp/confirm`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ callId: toolCall.id })
+              });
+              const confResult = await confResp.json();
+
+              if (ensureDataChannel()) {
+                dc.send(JSON.stringify({
+                  type: 'conversation.item.create',
+                  item: {
+                    type: 'function_call_output',
+                    call_id: toolCall.id,
+                    output: confResult.output
+                  }
+                }));
+                dc.send(JSON.stringify({ type: 'response.create' }));
+              }
+              LOG('✅ Tool confirmada e resultado enviado');
+            } else {
+              LOG('❌ Usuário negou a execução');
+              if (ensureDataChannel()) {
+                dc.send(JSON.stringify({
+                  type: 'conversation.item.create',
+                  item: {
+                    type: 'function_call_output',
+                    call_id: toolCall.id,
+                    output: 'Erro: O usuário negou a permissão para executar esta ferramenta.'
+                  }
+                }));
+                dc.send(JSON.stringify({ type: 'response.create' }));
+              }
+            }
+          } else if (result.status === 'executed') {
+            if (ensureDataChannel()) {
+              dc.send(JSON.stringify({
+                type: 'conversation.item.create',
+                item: {
+                  type: 'function_call_output',
+                  call_id: toolCall.id,
+                  output: result.output
+                }
+              }));
+              dc.send(JSON.stringify({ type: 'response.create' }));
+            }
+            LOG('✅ Tool executada com sucesso');
+          } else {
+            if (ensureDataChannel()) {
+              dc.send(JSON.stringify({
+                type: 'conversation.item.create',
+                item: {
+                  type: 'function_call_output',
+                  call_id: toolCall.id,
+                  output: result.output
+                }
+              }));
+              dc.send(JSON.stringify({ type: 'response.create' }));
+            }
+            LOG('⚠️ Tool bloqueada ou erro:', result.output);
+          }
+        } catch (err) {
+          LOG('❌ Erro no loop de execução de tool:', err);
+        }
+      })();
+      break;
+    }
+    case 'response.output_text.delta':
+    case 'response.text.delta': {
+      const el = document.getElementById(responseId) || addBubble('bot', '', responseId, true);
+      el.textContent += msg.delta || '';
+      el.classList.add('partial');
+      break;
+    }
+    case 'response.output_text.done':
+    case 'response.text.done':
+    case 'response.completed': {
+      const el = document.getElementById(responseId);
+      if (el) el.classList.remove('partial');
+      break;
+    }
+    case 'conversation.item.input_audio_transcription.delta': {
+      const id = `u_${msg.item_id || 'stt'}`;
+      const el = document.getElementById(id) || addBubble('user', '', id, true);
+      el.textContent += msg.delta || msg.text || '';
+      break;
+    }
+    case 'conversation.item.input_audio_transcription.completed': {
+      const text = msg.transcript || msg.text || '';
+      if (text) addBubble('user', text);
+      break;
+    }
+    case 'response.audio_transcript.delta': {
+      const id = `tr_${responseId || 'audio'}`;
+      const el = document.getElementById(id) || addBubble('bot', '', id, true);
+      el.textContent += msg.delta || msg.text || '';
+      break;
+    }
+    case 'response.audio_transcript.done': {
+      const id = `tr_${responseId || 'audio'}`;
+      const el = document.getElementById(id);
+      if (el) el.classList.remove('partial');
+      break;
+    }
+    case 'error': {
+      addBubble('bot', `Erro: ${msg.error?.message || 'desconhecido'}`);
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+async function connect() {
+  if (connected) return;
+  connectBtn.disabled = true;
+  LOG('Conectando...');
+  try {
+    const token = await requestEphemeralKey();
+    LOG('Token OK', { voice: voiceSelect?.value, model: activeModel });
+
+    pc = new RTCPeerConnection();
+    dc = pc.createDataChannel('oai-events');
+
+    dc.onopen = () => {
+      LOG('DataChannel aberto');
+      sendTextBtn.disabled = false;
+      sendImgBtn.disabled = false;
+      addBubble('bot', 'Conectado! Pode falar, digitar ou enviar imagens.');
+    };
+    dc.onclose = () => {
+      LOG('DataChannel fechado');
+      hangup();
+    };
+    dc.onerror = (event) => LOG('DataChannel erro', event.message || event);
+
+    dc.onmessage = (e) => {
+      try {
+        const payload = JSON.parse(e.data);
+        handleRealtimePayload(payload);
+      } catch (err) {
+        addBubble('bot', String(e.data));
+      }
+    };
+
+    remoteAudio = new Audio();
+    remoteAudio.autoplay = true;
+    remoteAudio.playsInline = true;
+    pc.ontrack = (event) => {
+      if (!remoteAudio.srcObject) {
+        remoteAudio.srcObject = event.streams[0];
+        LOG('Audio remoto conectado');
+      }
+    };
+    document.body.appendChild(remoteAudio);
+
+    pc.oniceconnectionstatechange = () => LOG('ICE', pc.iceConnectionState);
+    pc.onconnectionstatechange = () => LOG('Peer', pc.connectionState);
+
+    if (!talkToggle || talkToggle.checked) {
+      await enableMic();
+    } else {
+      disableMic();
+    }
+
+    const offer = await pc.createOffer({ offerToReceiveAudio: true });
+    await pc.setLocalDescription(offer);
+
+    const sdpResp = await fetch(`${REALTIME_URL}?model=${encodeURIComponent(activeModel)}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/sdp',
+        'OpenAI-Beta': 'realtime=v1'
+      },
+      body: offer.sdp
+    });
+    const answerSdp = await sdpResp.text();
+    if (!sdpResp.ok) {
+      LOG('Sinalizacao falhou', answerSdp);
+      throw new Error(`Sinalizacao falhou (${sdpResp.status})`);
+    }
+    await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+    connected = true;
+    hangupBtn.disabled = false;
+    LOG('Conexao WebRTC estabelecida');
+  } catch (err) {
+    LOG('Erro', err.message || err);
+    hangup();
+  } finally {
+    if (!connected) connectBtn.disabled = false;
+  }
+}
+
+function hangup() {
+  connected = false;
+  if (dc) {
+    try { dc.close(); } catch (err) { LOG('dc close erro', err); }
+    dc = null;
+  }
+  if (pc) {
+    try { pc.getSenders().forEach(sender => { try { pc.removeTrack(sender); } catch (_) {} }); } catch (_) {}
+    try { pc.close(); } catch (err) { LOG('pc close erro', err); }
+    pc = null;
+  }
+  if (remoteAudio) {
+    try { remoteAudio.pause(); } catch (_) {}
+    remoteAudio.srcObject = null;
+    remoteAudio.remove();
+    remoteAudio = null;
+  }
+  disableMic();
+  sendTextBtn.disabled = true;
+  sendImgBtn.disabled = true;
+  hangupBtn.disabled = true;
+  connectBtn.disabled = false;
+}
+
+function sendTextMessage() {
+  const text = textInput.value.trim();
+  if (!text) return;
+  addBubble('user', text);
+  textInput.value = '';
+  sendResponseCreate([{ type: 'input_text', text }]);
+}
+
+async function handleImages() {
+  const files = Array.from(imgInput.files || []);
+  if (!files.length) return;
+  const dataUrls = [];
+  for (const file of files) {
+    try {
+      const resized = await resizeAndCompressImage(file);
+      dataUrls.push(resized.dataUrl);
+    } catch (err) {
+      LOG('Imagem erro', err.message || err);
+    }
+  }
+  if (!dataUrls.length) return;
+  const caption = textInput.value.trim();
+  const bubble = addBubble('user', caption || '(imagem)');
+  appendImages(bubble, dataUrls);
+  const content = [
+    ...dataUrls.map(src => ({ type: 'input_image', image_url: src })),
+    ...(caption ? [{ type: 'input_text', text: caption }] : [])
+  ];
+  textInput.value = '';
+  imgInput.value = '';
+  sendResponseCreate(content);
+}
+
+async function resizeAndCompressImage(file, options = {}) {
+  const maxDim = options.maxDim || 1280;
+  const maxBytes = options.maxBytes || 1500000;
+  const qualityStart = 0.85;
+  const qualityMin = 0.6;
+
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0, width, height);
+
+  const toBlob = (q) => new Promise((resolve, reject) => {
+    canvas.toBlob(blob => {
+      if (!blob) reject(new Error('Blob vazio'));
+      else resolve(blob);
+    }, 'image/webp', q);
+  });
+
+  let quality = qualityStart;
+  let blob = await toBlob(quality);
+  while (blob.size > maxBytes && quality > qualityMin) {
+    quality = Math.max(qualityMin, quality - 0.05);
+    blob = await toBlob(quality);
+  }
+  const dataUrl = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(fr.error || new Error('FileReader erro'));
+    fr.readAsDataURL(blob);
+  });
+  return { dataUrl, bytes: blob.size, width, height };
+}
+
+async function runAgent() {
+  const text = document.getElementById('agentInput').value.trim();
+  if (!text) return;
+  const log = document.getElementById('agentLog');
+  log.textContent += `Usuario: ${text}\n`;
+  try {
+    const resp = await fetch(MCP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: text })
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(data?.error?.message || data?.error || JSON.stringify(data));
+    }
+    log.textContent += `${JSON.stringify(data, null, 2)}\n`;
+  } catch (err) {
+    log.textContent += `Erro: ${err.message || err}\n`;
+  } finally {
+    log.scrollTop = log.scrollHeight;
+  }
+}
+
+const $ = (id) => document.getElementById(id);
+const browserLog = $('browserLog');
+
+function appendImg(base64) {
+  const img = new Image();
+  img.src = base64.startsWith('data:') ? base64 : `data:image/png;base64,${base64}`;
+  browserLog.innerHTML = '';
+  browserLog.appendChild(img);
+}
+
+$('btnNavigate').onclick = async () => {
+  const url = $('navUrl').value.trim();
+  if (!url) return;
+  const resp = await fetch(`${BROWSER_BASE}/browser/navigate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url })
+  });
+  LOG('navigate', await resp.json());
+};
+
+$('btnClick').onclick = async () => {
+  const selector = $('sel').value.trim();
+  if (!selector) return;
+  const resp = await fetch(`${BROWSER_BASE}/browser/click`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ selector })
+  });
+  LOG('click', await resp.json());
+};
+
+$('btnType').onclick = async () => {
+  const selector = $('sel').value.trim();
+  const text = $('txt').value || '';
+  if (!selector) return;
+  const resp = await fetch(`${BROWSER_BASE}/browser/type`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ selector, text })
+  });
+  LOG('type', await resp.json());
+};
+
+$('btnPressEnter').onclick = async () => {
+  const resp = await fetch(`${BROWSER_BASE}/browser/pressKey`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: 'Enter' })
+  });
+  LOG('pressKey', await resp.json());
+};
+
+$('btnWait').onclick = async () => {
+  const selector = $('sel').value.trim();
+  if (!selector) return;
+  const resp = await fetch(`${BROWSER_BASE}/browser/wait`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ selector, timeoutMs: 8000 })
+  });
+  LOG('wait', await resp.json());
+};
+
+$('btnShot').onclick = async () => {
+  const resp = await fetch(`${BROWSER_BASE}/browser/screenshot`, { method: 'POST' });
+  const data = await resp.json();
+  LOG('screenshot', data);
+  const b64 = data?.image || data?.base64 || data?.data || data?.result?.image || data?.result?.base64;
+  if (b64) appendImg(b64);
+};
+
+connectBtn.addEventListener('click', connect);
+hangupBtn.addEventListener('click', hangup);
+sendTextBtn.addEventListener('click', sendTextMessage);
+textInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    sendTextMessage();
+  }
+});
+sendImgBtn.addEventListener('click', handleImages);
+$('runAgentBtn').addEventListener('click', runAgent);
+
+if (talkToggle) {
+  talkToggle.addEventListener('change', async (event) => {
+    if (!pc) {
+      if (!event.target.checked) disableMic();
+      return;
+    }
+    if (event.target.checked) {
+      try {
+        await enableMic();
+      } catch (err) {
+        LOG('Mic error', err.message || err);
+        event.target.checked = false;
+      }
+    } else {
+      disableMic();
+    }
+  });
+}
+
+window.addEventListener('beforeunload', hangup);
+</script>
+</body>
+</html>
