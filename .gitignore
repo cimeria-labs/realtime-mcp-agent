@@ -1,6 +1,10 @@
 # Dependencies
 node_modules/
 
+# Build / Output
+dist/
+coverage/
+
 # Large/binary data
 MCP/ChromeCDP/
 MCP/realtime-client/node_modules/
@@ -9,11 +13,28 @@ MCP/realtime-client/*.pem
 MCP/realtime-client/mkcert.exe
 
 # Logs
-logs/
 *.log
+logs/
 
 # Environment
 .env
+.env.*
+!.env.example
+
+# Certificates
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Credentials
+service-account*.json
+credentials*.json
+
+# Sandbox data
+sandbox/*
+!sandbox/.gitkeep
 
 # OS
 .DS_Store
