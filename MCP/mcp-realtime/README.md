@@ -1,62 +1,74 @@
 # 🔐 Realtime MCP Agent
 
-> Um agente de automação por voz com **governança humana**. A IA ouve, planeja e propõe ações — mas **nunca executa** ferramentas sensíveis sem sua aprovação explícita, rodando dentro de um **sandbox isolado** via protocolo MCP.
+> Protótipo de orquestrador seguro para automação via IA. Intercepta chamadas de ferramentas (MCP), aplica regras de segurança (`allow`/`block`/`confirm`) e exige aprovação humana antes de executar ações de alto risco.
 
 ---
 
-## 🎯 O que faz
+## 🎯 O que faz (de verdade)
 
-Fale com a IA pelo navegador. Ela entende seus comandos, acessa ferramentas (navegador, e-mail, sistema de arquivos) e, quando uma ação é considerada de alto risco, **interrompe o fluxo e pede sua confirmação** antes de prosseguir.
+Este é um **backend de segurança** que funciona entre a IA e as ferramentas do sistema.
 
-```
-Você: "Envie um e-mail para o João e depois tire um screenshot do site"
-IA: "Entendi. Para enviar o e-mail, preciso da sua confirmação."
-[Sistema exibe diálogo de aprovação]
-Você: [Confirma]
-IA: [Executa e-mail] → "Feito. Agora tirando o screenshot..." [Executa screenshot]
-```
+- Recebe requisições de execução de ferramentas (via HTTP ou MCP)
+- Avalia cada tool contra o `PolicyEngine` — `allow`, `block` ou `confirm`
+- Se a tool exigir confirmação, **interrompe** e devolve status `requires_confirmation`
+- Só executa se o usuário confirmar explicitamente (via endpoint `/mcp/confirm`)
+- O `SandboxManager` garante que operações de arquivo fiquem dentro de uma pasta isolada
+
+**O que NÃO faz ainda:**
+- ❌ Não há pipeline de voz end-to-end (STT/LLM/TTS) rodando localmente
+- ❌ O WebRTC no frontend conecta diretamente na OpenAI — nosso backend não processa áudio
+- ❌ A confirmação de segurança no frontend usa `alert()` nativo (funcional, mas não é UI polida)
+- ❌ Requer servidores MCP externos configurados manualmente no `mcp-config.json` para ter tools
 
 ---
 
-## 🏗️ Arquitetura
+## 🏗️ Arquitetura Real
 
 ```mermaid
-flowchart LR
-    subgraph Client["🌐 Browser (WebRTC)"]
-        Mic["🎤 Microfone"]
-        UI["🖱️ UI de Confirmação"]
-        Audio["🔊 Áudio Resposta"]
+flowchart TD
+    subgraph Browser["🌐 Browser"]
+        HTML["realtime-webrtc.html\nConecta na OpenAI Realtime API\n(voice -> text -> voice)"]
     end
 
-    subgraph Backend["⚙️ Node.js Orchestrator"]
-        Security["🛡️ PolicyEngine\nallow / block / confirm"]
-        Sandbox["📁 SandboxManager\nisolamento de arquivos"]
-        MCP["🔌 MCP Client SDK\nmulti-server"]
+    subgraph OpenAI["☁️ OpenAI Realtime API"]
+        AI["GPT-4o Realtime\nSTT + LLM + TTS"]
     end
 
-    subgraph AI["🧠 OpenAI Realtime API"]
-        STT["Speech-to-Text"]
-        LLM["LLM + Tool Calling"]
-        TTS["Text-to-Speech"]
+    subgraph Backend["⚙️ Nosso Backend (Node.js)"]
+        API["/mcp/execute\n/mcp/confirm\n/mcp/run"]
+        Policy["🛡️ PolicyEngine\navaliza tool calls"]
+        Sandbox["📁 SandboxManager\nisola arquivos"]
+        MCPClient["🔌 MCP SDK Client\nconecta N servidores"]
     end
 
-    subgraph Tools["🧰 MCP Servers"]
-        Chrome["🌐 Chrome Browser"]
-        FS["📂 FileSystem"]
-        Email["✉️ Email"]
+    subgraph External["🧰 Servidores MCP Externos"]
+        Chrome["Browser MCP"]
+        FS["FileSystem MCP"]
+        Email["Email SMTP"]
     end
 
-    Mic -->|WebRTC DataChannel| AI
-    AI -->|Tool Call Request| Security
-    Security -->|Aprovado| MCP
-    Security -->|Requer Confirmação| UI
-    UI -->|Usuário Confirma| Security
-    MCP --> Chrome
-    MCP --> FS
-    MCP --> Email
-    MCP -->|Resultado| AI
-    AI -->|Streaming Áudio| Audio
+    HTML -->|WebRTC| AI
+    AI -->|Tool Call| HTML
+    HTML -->|HTTP POST /mcp/execute| API
+    API --> Policy
+    Policy -->|allow| MCPClient
+    Policy -->|confirm| API
+    API -->|HTTP /mcp/confirm| Policy
+    MCPClient --> Chrome
+    MCPClient --> FS
+    MCPClient --> Email
+    MCPClient -->|resultado| API
+    API -->|HTTP| HTML
 ```
+
+**Fluxo real:**
+1. Usuário fala com a IA via OpenAI Realtime (WebRTC)
+2. IA decide chamar uma ferramenta → envia comando pro frontend
+3. Frontend faz **HTTP POST para nosso backend** (`/mcp/execute`)
+4. Nosso backend (`PolicyEngine`) decide: executa, bloqueia, ou pede confirmação
+5. Se for `confirm`, frontend mostra `alert()` — usuário clica OK ou Cancela
+6. Se confirmado, backend chama o servidor MCP real (Chrome, Filesystem, etc.)
+7. Resultado volta pro frontend, que envia de volta pra OpenAI via WebRTC
 
 ---
 
@@ -64,16 +76,16 @@ flowchart LR
 
 | Camada | Implementação | O que protege |
 |--------|---------------|---------------|
-| **Policy Engine** | Regras `allow` / `block` / `confirm` por ferramenta | Ações não-autorizadas são interceptadas antes de executar |
-| **Confirmação Humana** | Loop assíncrono via HTTP + UI de alerta no navegador | O usuário tem a última palavra em ações de alto risco |
-| **Sandbox Manager** | Validação de caminho com `path.resolve` + prefixo | Ataques de path traversal (ex: `../../etc/passwd`) são bloqueados |
-| **MCP SDK Oficial** | Protocolo JSON-RPC tipado via `@modelcontextprotocol/sdk` | Comunicação robusta e extensível com servidores MCP |
+| **Policy Engine** | `PolicyEngine.ts` — regras `allow`/`block`/`confirm` por nome de tool | Intercepta tool calls antes da execução |
+| **Confirmação Humana** | `AgentOrchestrator` armazena call pendente + endpoint `/mcp/confirm` | Usuário tem veto final em ações de alto risco |
+| **Sandbox Manager** | `SandboxManager.ts` — `path.resolve` + validação de prefixo | Impede path traversal (`../../etc/passwd`) |
+| **MCP SDK Oficial** | `@modelcontextprotocol/sdk` — `Client` + `StdioClientTransport` | Conecta servidores MCP reais (não mocks) |
 
 ---
 
 ## 🚀 Como Rodar
 
-### 1. Clone e instale
+### 1. Instale dependências
 ```bash
 cd MCP/mcp-realtime
 npm install
@@ -82,45 +94,71 @@ npm install
 ### 2. Configure o ambiente
 ```bash
 cp .env.example .env
-# Edite .env e insira sua OPENAI_API_KEY
+# Edite .env:
+#   OPENAI_API_KEY=sk-... (obrigatório)
+#   MCP_AUTH=Bearer ... (opcional, protege endpoints)
 ```
 
-### 3. Configure os MCP Servers
-Edite `mcp-config.json` para apontar para seus servidores MCP (Chrome, Filesystem, etc.).
+### 3. Configure servidores MCP
+Edite `mcp-config.json`. Exemplo:
+```json
+{
+  "mcpServers": [
+    {
+      "id": "chrome",
+      "command": "node",
+      "args": ["../mcp-chrome-stdio.js"],
+      "enabled": true
+    }
+  ]
+}
+```
+
+**Sem servidores MCP configurados, o sistema não terá ferramentas para chamar.**
 
 ### 4. Inicie o servidor
 ```bash
 npm run dev
 ```
 
-O servidor sobe em `http://localhost:3000`.
-
 ### 5. Abra o cliente
-Abra `MCP/realtime-client/realtime-webrtc.html` no navegador (recomenda-se HTTPS para microfone).
+Abra `MCP/realtime-client/realtime-webrtc.html` em um navegador.
+
+**Importante:** O microfone só funciona em contexto seguro (HTTPS ou `localhost`). Para HTTPS local, gere certificados com `mkcert`.
 
 ---
 
-## 📡 Endpoints da API
+## 📡 Endpoints
 
 | Rota | Método | Descrição |
 |------|--------|-----------|
-| `/mcp/run` | `POST` | Executa um prompt completo (LLM + tools + segurança) |
-| `/mcp/execute` | `POST` | Executa uma única tool com validação de política |
-| `/mcp/confirm` | `POST` | Confirma uma tool que estava pendente de aprovação |
-| `/mcp` | `GET` | Transporte SSE para clientes MCP nativos |
+| `POST /mcp/run` | Prompt completo (chama LLM + tools) | Requer `OPENAI_API_KEY` |
+| `POST /mcp/execute` | Executa uma tool com validação de política | Retorna `executed`, `blocked` ou `requires_confirmation` |
+| `POST /mcp/confirm` | Confirma uma tool pendente | Executa a tool previamente interrompida |
+| `GET /mcp` | Transporte SSE para clientes MCP nativos | Conforme protocolo MCP |
 
 ---
 
-## 🧰 Stack Tecnológica
+## 🧰 Stack
 
-- **Backend**: Node.js + TypeScript + Express
+- **Backend**: Node.js 20+, TypeScript, Express
 - **Segurança**: Policy Engine customizado + Sandbox Manager
-- **IA**: OpenAI Realtime API (WebRTC + Tool Calling)
-- **Protocolo**: MCP (Model Context Protocol) via SDK oficial
-- **Frontend**: Vanilla JS + WebRTC (navegador)
+- **IA**: OpenAI Realtime API (frontend conecta direto) / OpenAI Responses API (backend)
+- **Protocolo**: MCP SDK oficial (`@modelcontextprotocol/sdk` v1.2.0)
+- **Frontend**: HTML + Vanilla JS (WebRTC nativo)
+
+---
+
+## ⚠️ Limitações Conhecidas (Protótipo)
+
+1. **Confirmação UI:** Usa `window.confirm()` nativo. É funcional mas não é experiência polida.
+2. **Dependência OpenAI:** Requer `OPENAI_API_KEY` válida. Sem ela, nada funciona.
+3. **MCP Servers:** Você precisa instalar/configurar servidores MCP manualmente. Não vêm embutidos.
+4. **HTTPS:** Microfone no navegador re HTTPS (exceto localhost). Certificados auto-assinados são necessários para testes.
+5. **Sandbox:** Apenas validação de caminho. Não é isolamento de processo real (containers, etc.).
 
 ---
 
 ## 📄 Licença
 
-Projeto pessoal de estudo e prototipagem. Uso livre para referência.
+Projeto pessoal de estudo. Uso livre para referência e aprendizado.
